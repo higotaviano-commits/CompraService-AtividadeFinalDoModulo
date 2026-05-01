@@ -1,42 +1,32 @@
 package tech.ada.tenthirty.ecommerce.services;
 
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.ArgumentMatchers;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.Mockito;
+import org.mockito.*;
 import org.mockito.junit.jupiter.MockitoExtension;
 import tech.ada.tenthirty.ecommerce.client.EstoqueClient;
 import tech.ada.tenthirty.ecommerce.client.payload.ItemResponse;
 import tech.ada.tenthirty.ecommerce.exception.NotFoundException;
 import tech.ada.tenthirty.ecommerce.exception.QuantidadeIndisponivelException;
-import tech.ada.tenthirty.ecommerce.model.Compra;
-import tech.ada.tenthirty.ecommerce.model.Item;
-import tech.ada.tenthirty.ecommerce.model.StatusCompra;
+import tech.ada.tenthirty.ecommerce.model.*;
 import tech.ada.tenthirty.ecommerce.payload.ItemAdicionadoRequest;
 import tech.ada.tenthirty.ecommerce.payload.response.CompraResponse;
-import tech.ada.tenthirty.ecommerce.repository.CompraRepository;
-import tech.ada.tenthirty.ecommerce.repository.ItemRepository;
+import tech.ada.tenthirty.ecommerce.repository.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.*;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-public class AdicionarProdutosServiceTest {
+class AdicionarProdutosServiceTest {
 
     @InjectMocks
-    private AdicionarProdutosService adicionarProdutosService;
+    private AdicionarProdutosService service;
 
     @Mock
     private CompraRepository compraRepository;
@@ -51,86 +41,97 @@ public class AdicionarProdutosServiceTest {
     private EstoqueClient estoqueClient;
 
     @BeforeEach
-    public void setup(){
-        ItemResponse itemResponse = new ItemResponse();
-        itemResponse.setQuantidade(50);
+    void setup() {
+        ItemResponse estoque = new ItemResponse();
+        estoque.setQuantidade(50);
+
         when(estoqueClient.consultarEstoqueProduto(anyString()))
-                .thenReturn(itemResponse);
+                .thenReturn(estoque);
     }
 
     @Test
-    void shouldSaveANewCompra(){
-        CompraResponse compraResponse = adicionarProdutosService
-                .execute(getItemAdicionado("123",12.4));
-        ArgumentCaptor<Compra> compraArgumentCaptor = ArgumentCaptor.forClass(Compra.class);
-        verify(compraRepository, atLeast(1))
-                .save(compraArgumentCaptor.capture());
+    void deveCriarNovaCompra() {
+        ItemAdicionadoRequest request = new ItemAdicionadoRequest();
+        request.setSkuId("123");
+        request.setValorUnitario(12.4);
+        request.setQuantidade(1);
 
-        verify(itemRepository, times(1)).save(any(Item.class));
 
-        assertEquals(compraResponse.getId(), compraArgumentCaptor.getValue().getIdentificador());
+        CompraResponse response = service.execute(request);
+
+
+        ArgumentCaptor<Compra> captor = ArgumentCaptor.forClass(Compra.class);
+
+        verify(compraRepository).save(captor.capture());
+        verify(itemRepository).save(any(Item.class));
+        verify(updateValorTotalCompraService).execute(any(Compra.class));
+
+        Compra compraSalva = captor.getValue();
+
+        assertNotNull(response.getId());
+        assertEquals(response.getId(), compraSalva.getIdentificador());
     }
 
     @Test
-    void shouldUpdateAnExistingCompra(){
-        Compra compraSample = getCompraSample();
-        when(compraRepository.findByIdentificador(ArgumentMatchers.anyString()))
-                .thenReturn(Optional.of(compraSample));
-        ItemAdicionadoRequest itemAdicionado = getItemAdicionado("123", 12.4);
-        itemAdicionado.setIdCompra(compraSample.getIdentificador());
-        CompraResponse compraResponse = adicionarProdutosService
-                .execute(itemAdicionado);
+    void deveAdicionarItemEmCompraExistente() {
 
-
-        verify(itemRepository, times(1)).save(any(Item.class));
-
-        verify(compraRepository, never())
-                .save(any(Compra.class));
-
-        assertEquals(compraResponse.getId(), compraSample.getIdentificador());
-    }
-
-    @Test
-    void shouldRaiseAnExcetionWithCompraIdNotFound(){
-        when(compraRepository.findByIdentificador(ArgumentMatchers.anyString()))
-                .thenReturn(Optional.empty());
-        ItemAdicionadoRequest itemAdicionado = getItemAdicionado("123", 12.4);
-        itemAdicionado.setIdCompra("Any");
-
-          assertThrows(NotFoundException.class,() -> adicionarProdutosService
-                .execute(itemAdicionado));
-
-    }
-
-    @Test
-     void shouldRaiseAnErrorWithStockQuantityIsLessThanRequired(){
-
-        Compra compraSample = getCompraSample();
-        lenient().when(compraRepository.findByIdentificador(ArgumentMatchers.anyString()))
-                .thenReturn(Optional.of(compraSample));
-        ItemAdicionadoRequest itemAdicionado = getItemAdicionado("123", 12.4);
-        itemAdicionado.setQuantidade(51);
-        itemAdicionado.setIdCompra(compraSample.getIdentificador());
-        assertThrows(QuantidadeIndisponivelException.class, ()-> adicionarProdutosService
-                .execute(itemAdicionado));
-
-    }
-
-    private Compra getCompraSample() {
         Compra compra = new Compra();
-        compra.setStatusCompra(StatusCompra.PENDENTE);
-        compra.setDataCompra(LocalDateTime.now());
-        compra.setValorTotal(BigDecimal.TEN);
-        compra.setIdentificador(UUID.randomUUID().toString());
         compra.setId(1L);
-        return compra;
+        compra.setIdentificador(UUID.randomUUID().toString());
+        compra.setStatusCompra(StatusCompra.PENDENTE);
+        compra.setValorTotal(BigDecimal.TEN);
+        compra.setDataCompra(LocalDateTime.now());
+
+        when(compraRepository.findByIdentificador(anyString()))
+                .thenReturn(Optional.of(compra));
+
+        ItemAdicionadoRequest request = new ItemAdicionadoRequest();
+        request.setSkuId("123");
+        request.setValorUnitario(12.4);
+        request.setQuantidade(1);
+        request.setIdCompra(compra.getIdentificador());
+
+
+        CompraResponse response = service.execute(request);
+
+        verify(itemRepository).save(any(Item.class));
+        verify(compraRepository, never()).save(any());
+        verify(updateValorTotalCompraService).execute(compra);
+
+        assertEquals(compra.getIdentificador(), response.getId());
     }
 
-    private ItemAdicionadoRequest getItemAdicionado(String sku, double value){
-        ItemAdicionadoRequest itemAdicionadoRequest = new ItemAdicionadoRequest();
-        itemAdicionadoRequest.setValorUnitario(value);
-        itemAdicionadoRequest.setSkuId(sku);
-        itemAdicionadoRequest.setQuantidade(1);
-        return itemAdicionadoRequest;
+    @Test
+    void deveLancarExcecaoQuandoCompraNaoExiste() {
+
+        when(compraRepository.findByIdentificador(anyString()))
+                .thenReturn(Optional.empty());
+
+        ItemAdicionadoRequest request = new ItemAdicionadoRequest();
+        request.setSkuId("123");
+        request.setValorUnitario(12.4);
+        request.setQuantidade(1);
+        request.setIdCompra("inexistente");
+
+
+        assertThrows(NotFoundException.class,
+                () -> service.execute(request));
+
+        verify(itemRepository, never()).save(any());
+    }
+
+    @Test
+    void deveLancarExcecaoQuandoEstoqueInsuficiente() {
+
+        ItemAdicionadoRequest request = new ItemAdicionadoRequest();
+        request.setSkuId("123");
+        request.setValorUnitario(12.4);
+        request.setQuantidade(51); // maior que estoque
+
+
+        assertThrows(QuantidadeIndisponivelException.class,
+                () -> service.execute(request));
+
+        verify(itemRepository, never()).save(any());
     }
 }
